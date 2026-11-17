@@ -73,6 +73,30 @@ npm run dev
   `backend/app/routers/<模块>.py`，业务规则在 `backend/app/services/<模块>.py`。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+- 静态路由（如 `/export`）必须声明在 `/{entry_id}` 之前，否则会被参数路由抢先匹配。
+
+## 增量质量重算与导出复核
+
+采集质量不再每次全量重算，数据流如下（跟着数据流查找）：
+
+```text
+POST /api/qualityreport/ingest        采集质量回执 → 作业结果(crawlresult)
+POST /api/qualityreport/{id}/recalc   冻结快照(qualitysnapshot) → 增量重算
+                                      → 交付对象(qualitydelivery：质量结论 + 报告导出结果数据集)
+GET  /api/qualityreport/{id}/deliveries[/{version}]   逐项复核
+GET  /api/contentextract/versions     结构化提取版本数据（可复用字段覆盖结果）
+GET  /api/contentextract/manifest     正文解析侧清单（结果摘要 + 回写的报告导出结果）
+```
+
+- 只读取受影响作业结果与结构化提取版本数据；未变化作业不重新扫描，复用缓存字段，
+  且复用记录可回到原始 URL 与提取版本、不另起分支。
+- 质量重算与导出共用同一冻结快照，结果写成一份交付对象；快照水位之后写入的数据不进导出。
+- 已确认报告保持不可变，增量重算只生成新版本；回执编号与写入序号保证重复/迟到结果不倒退版本。
+- 报告导出按操作键幂等，重复操作只生效一次；并发回执不会多出第二份结果。
+- 同一作业出现两个版本依据（新结果 vs 旧提取版本缓存）时判定为冲突：导出结果对应两份记录，
+  冲突记录优先级为高、排在复核前列。
+- 指标为零或字段缺失时仍形成可解释结论（写入「解释」字段，字段覆盖率缺失按 0 计入并标注）。
+- 测试：`cd backend && .venv/bin/python tests/test_incremental_quality.py`
 
 领域：数据工程
 子方向：数据采集、爬虫与RPA

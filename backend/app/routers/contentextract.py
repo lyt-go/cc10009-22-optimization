@@ -1,4 +1,12 @@
-"""内容提取接口：维护提取器，覆盖提交提取器评审、发布提取器、废弃提取器等动作。"""
+"""内容提取接口：维护提取器，覆盖提交提取器评审、发布提取器、废弃提取器等动作。
+
+正文解析侧附加接口：
+- GET /versions 结构化提取版本数据（冻结的字段覆盖结果，质量重算与导出共用）
+- GET /manifest 正文解析侧清单（质量侧写入的结果摘要与回写的报告导出结果）
+
+注意：静态路径（/export、/versions、/manifest）必须声明在 /{entry_id} 之前，
+否则会被参数路由抢先匹配。
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -30,6 +38,27 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出内容提取清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "contentextract", "total": total, "items": items}
+
+
+@router.get("/versions")
+def list_versions() -> dict[str, Any]:
+    """结构化提取版本数据：正文解析侧冻结的字段覆盖结果，质量重算与导出共用。"""
+    items = service.extraction_versions()
+    return {"module": "extractversion", "total": len(items), "items": items}
+
+
+@router.get("/manifest")
+def list_manifest() -> dict[str, Any]:
+    """正文解析侧清单：质量侧写入的结果摘要与回写的报告导出结果，供下游核对。"""
+    items = service.manifest_list()
+    return {"module": "contentmanifest", "total": len(items), "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条提取器明细；不存在时给出可读的错误说明。"""
@@ -56,10 +85,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出内容提取清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "contentextract", "total": total, "items": items}
